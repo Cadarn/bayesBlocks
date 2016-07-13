@@ -1,6 +1,8 @@
 
 # Bayesian Blocks
 ## A Python implementation that incorporates multiple independent time series
+[![DOI](https://zenodo.org/badge/23258/Cadarn/bayesBlocks.svg)](https://zenodo.org/badge/latestdoi/23258/Cadarn/bayesBlocks)
+
 
 This is a python implementation of:
 > Studies in Astronomical Time Series Analysis. VI. Bayesian Block Representations:
