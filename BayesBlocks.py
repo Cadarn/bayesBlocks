@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
-import pylab as plt
+import matplotlib.pyplot as plt
+from loguru import logger
 '''
 Implementing Bayesian Blocks based upon the paper below:
 ==========================================================================
@@ -176,47 +177,39 @@ class bblock(object):
         #Post process the data
         self._ProcessBlocks()
         
-        print('==============')
-        print('Analysis of input data has found that it is optimally segemented into %i blocks' %self.num_blocks)
+        logger.info(f'Analysis complete: data optimally segmented into {self.num_blocks} block(s)')
 
     def _ProcessData(self):
         '''Process the incoming data frame to establish the initial block edges and rate vectors
         '''
         
-        #Assign relative exposure of each data point if provided otherwise set all to 1
-        if hasattr(self.data, 'EXPOSURE'):
-            self.relExp = self.data.EXPOSURE/max(self.data.EXPOSURE)
+        if 'EXPOSURE' in self.data.columns:
+            self.relExp = self.data.EXPOSURE / max(self.data.EXPOSURE)
         else:
             self.relExp = np.ones(self.npoints, dtype=np.float64)
-        
-        if self.dataMode == 1: #TTE data
-            #Need to set times to the arrival times of photons and attribute one photon per bin
+
+        if self.dataMode == 1:
             self.time = np.array(self.data.TIME)
             self.nn_vec = np.ones(self.npoints)
-        elif self.dataMode == 2: #Binned Data
+        elif self.dataMode == 2:
             self.time = np.array(self.data.TIME)
-            if hasattr(self.data, 'COUNTS'):
+            if 'COUNTS' in self.data.columns:
                 self.nn_vec = self.data.COUNTS
-            elif hasattr(self.data, 'FLUX') and hasattr(self.data, 'EXPOSURE'):
+            elif 'FLUX' in self.data.columns and 'EXPOSURE' in self.data.columns:
                 self.nn_vec = self.data.FLUX * self.data.EXPOSURE
-                #Correct relative exposure array to be uniform now
                 self.relExp = np.ones(self.npoints, dtype=np.float64)
             else:
-                raise AttributeError("No COUNT column or FLUX & EXPOSURE column in input dataframe")            
-        elif self.dataMode == 3: #Point measurements
-            self.time = np.arange(self.npoints) #Nominal equal spaced time bins
-            try:
-                self.nn_vec = self.data.FLUX
-            except AttributeError:
-                print('No FLUX column provided in input dataframe with DATA_MODE = 3')
-                return False
-            try:
-                self.nn_vec_err = self.data.ERROR
-            except AttributeError:
-                print('No ERROR column provided in input dataframe with DATA_MODE = 3')
-                return False
+                raise AttributeError("No COUNTS column or FLUX & EXPOSURE columns in input dataframe")
+        elif self.dataMode == 3:
+            self.time = np.array(self.data.TIME)
+            if 'FLUX' not in self.data.columns:
+                raise AttributeError("No FLUX column in input dataframe for data_mode=3")
+            if 'ERROR' not in self.data.columns:
+                raise AttributeError("No ERROR column in input dataframe for data_mode=3")
+            self.nn_vec = self.data.FLUX
+            self.nn_vec_err = self.data.ERROR
         else:
-            print('No valid data mode found: .dataMode should be 1,2 or 3')
+            raise ValueError(f"Invalid data_mode {self.dataMode}: must be 1, 2, or 3")
         
         #Now we have a time vector and a 'flux' vector
         #Calculate dt
@@ -227,14 +220,14 @@ class bblock(object):
         #Calculate median of dt
         dt_median = np.median(dt)
         #Establish start and end times of observation
-        if hasattr(self.data, 'tStart'):
+        if 'tStart' in self.data.columns:
             tStart = self.data.tStart
         else:
-            tStart = self.time[0] - 0.5*dt_median #Default start time
-        if hasattr(self.data, 'tStop'):
+            tStart = self.time[0] - 0.5 * dt_median
+        if 'tStop' in self.data.columns:
             tStop = self.data.tStop
         else:
-            tStop = self.time[-1] + 0.5*dt_median #Default end time
+            tStop = self.time[-1] + 0.5 * dt_median
             
         #Finally calculate the block lengths if in data mode 1 or 2
         if self.dataMode != 3:
@@ -242,7 +235,7 @@ class bblock(object):
             tempTime = np.append(tempTime, tStop)
             self.tt = np.insert(tempTime, 0, tStart)
             self.block_length = tStop - self.tt
-        print('Input data processed ready for Bayesian Block calculation ...')       
+        logger.info('Input data processed ready for Bayesian Block calculation')
 
     def _CalcPrior(self, fp_rate = 0.003):
         '''Calculate the change point prior based upon the formulae from section 3 of Scargle et al. 2012.
@@ -258,7 +251,7 @@ class bblock(object):
             #For Event Data and Binned Data
             #self.ncp_prior = 4 - 73.53*fp_rate*self.npoints**(-0.478)
             self.ncp_prior = 4 - np.log(fp_rate/(0.0136*self.npoints**(0.478)))
-        print('Using a FAP of %f equates to a changepoint prior of %f' %(self.fp_rate, self.ncp_prior))
+        logger.info(f'FAP={self.fp_rate} → changepoint prior (ncp_prior)={self.ncp_prior:.6f}')
 
     def _CalcFitness(self):
         '''Calculate the "fitness" over the variety of bin widths and and record the changepoints'''
@@ -295,7 +288,7 @@ class bblock(object):
         #Store the best and last arrays to the object
         self.best = best
         self.last = last
-        print('Block fitness function assessed ...')                        
+        logger.info('Block fitness function assessed')
                                                                         
     def _RecoverCP(self):
         '''Find change points by iteratively peeling off the last block'''
@@ -305,7 +298,7 @@ class bblock(object):
         try:
             cpInd = self.last[-1]
         except NameError:
-            print('Trying to run before calculating block fitness: try running _CalcFitness')
+            logger.error('Trying to run before calculating block fitness: call _CalcFitness first')
             return None
         
         #Keeping looping through array until the index of the change point hits 0
@@ -320,12 +313,11 @@ class bblock(object):
         #Need to add the first point to the list of change points
         change_points.insert(0,0)
 
-        #Set internal parameters        
         self.change_points = np.array(change_points)
         self.num_cp = len(change_points)
-        self.num_blocks = len(change_points) + 1
-    
-        print('Changepoints recovered ...')               
+        self.num_blocks = len(change_points)
+
+        logger.info(f'Changepoints recovered: {self.num_blocks} block(s)')
 
     def _ProcessBlocks(self):
         '''Take the calculated changepoints and process the data to give useful outputs e.g. block rates
@@ -333,40 +325,31 @@ class bblock(object):
         try:
             assert self.num_cp == len(self.change_points)
         except NameError:
-            print('Trying to post-process data prior to calculating blocks: try running _RecoverCP')
+            logger.error('Trying to post-process data before recovering changepoints: call _RecoverCP first')
             return False
-        #If last change point doesn't correspond to end of data then add that as a point
-        if self.change_points[-1] != self.npoints - 1:
-            self.change_points = np.append(self.change_points, np.array([self.npoints -1]))
-        else:
-            self.num_blocks -= 1
-            
+
+        # Build boundary array: block start indices + final data index as sentinel
+        block_starts = np.append(self.change_points, self.npoints - 1)
+
         self.rate_vec = np.zeros(self.num_blocks)
-        self.num_vec =  np.zeros(self.num_blocks)
+        self.num_vec = np.zeros(self.num_blocks)
         self.dt_vec = np.zeros(self.num_blocks)
-    
+
         for id_block in range(self.num_blocks):
-            ii_1 = self.change_points[id_block]   #Start
-        
-            if id_block < self.num_blocks - 2 :
-                ii_2 = self.change_points[id_block + 1] 
-            else:
-                ii_2 = self.npoints - 1
-            #Check that ii_1 != ii_2:
-            if ii_1 == ii_2:
-                break #Instance of last change_point matching the last data point
+            ii_1 = block_starts[id_block]
+            ii_2 = block_starts[id_block + 1]
+
             if self.dataMode == 3:
                 xx_this = self.nn_vec[ii_1:ii_2]
-                wt_this = 1./(self.nn_vec_err[ii_1:ii_2]**2.)
-                self.rate_vec[id_block] = np.sum(wt_this*xx_this)/np.sum(wt_this) 
+                wt_this = 1.0 / (self.nn_vec_err[ii_1:ii_2] ** 2.0)
+                self.rate_vec[id_block] = np.sum(wt_this * xx_this) / np.sum(wt_this)
             else:
                 num_this = np.sum(self.nn_vec[ii_1:ii_2])
                 delta_tt = self.time[ii_2] - self.time[ii_1]
                 self.num_vec[id_block] = num_this
-                rate_this = num_this/delta_tt
-                self.rate_vec[id_block] = rate_this
-                
-        print('Post processing complete...')
+                self.rate_vec[id_block] = num_this / delta_tt if delta_tt > 0 else 0.0
+
+        logger.info('Post processing complete')
 
 class bblock_multi(object):
     '''Multi observation Bayesian Blocks Analysis class
@@ -387,17 +370,16 @@ class bblock_multi(object):
                              the data mode for all of the time_series.
                              Form of data: 1 = time tagged events; 2 = binned data; 3 = point measurements (Default: 1)
         '''
-        if type(data_modes) == list:
-            try:
-                assert len(time_series_list) == len(data_modes)
-            except AssertionError:
-                print('Number of data modes does not match number of time series.')
+        if isinstance(data_modes, list):
+            if len(time_series_list) != len(data_modes):
+                raise ValueError(
+                    f"data_modes length ({len(data_modes)}) must match "
+                    f"time_series_list length ({len(time_series_list)})"
+                )
+        elif isinstance(data_modes, int):
+            data_modes = [data_modes for _ in time_series_list]
         else:
-            try:
-                assert type(data_modes) == int
-                data_modes = [data_modes for x in time_series_list]
-            except AssertionError:
-                print('INVALID data_modes supplied: Should be either a list of data modes or an integer.')
+            raise TypeError("data_modes must be an int or a list of ints")
 
         #Store the original light curves and the Bayesian Blocks representations of each dataset
         self.datasets = []
@@ -415,8 +397,6 @@ class bblock_multi(object):
         self.tt_stop_vec = np.zeros(self.nseries)
         self.ii_start_vec = np.zeros(self.nseries)
         
-        description = "Object representing a multi-variate Bayesian Blocks representation of multi observation data"
-        author = "Coded by ABH 10/11/2014"
         
     def _processTimeMarkers(self):
         '''Process the time markers for each time series'''
@@ -432,12 +412,11 @@ class bblock_multi(object):
             self.tt = np.append(self.tt, tt_this)
             self.ii_start_vec[id_series] = ii_start
             ii_start += num_points_this
-            tt_start = min(self.bbData[id_series].data.TIME) - 0.5*np.median(dt_this)
-            tt_start_vec[id_series] = tt_start
-            tt_stop = max(dataList[id_series].data.TIME) + 0.5*np.median(dt_this)
-            tt_stop_vec[id_series] = tt_stop
-            ncp_prior = dataList[id_series].ncp_prior
-            ncp_prior_vec[id_series] = ncp_prior            
+            tt_start = min(self.bbData[id_series].data.TIME) - 0.5 * np.median(dt_this)
+            self.tt_start_vec[id_series] = tt_start
+            tt_stop = max(self.bbData[id_series].data.TIME) + 0.5 * np.median(dt_this)
+            self.tt_stop_vec[id_series] = tt_stop
+            self.ncp_prior_vec[id_series] = self.bbData[id_series].ncp_prior
         
 '''
 tt = []
@@ -468,9 +447,9 @@ def testBayes():
     
     myBlocks = bblock(subDF, data_mode=1)
     myBlocks.find_blocks(fp_rate = 0.05)
-    print(myBlocks.change_points)
-    H1 = plt.hist(subDF.TIME, bins=32, histtype='stepfilled', alpha=0.2, normed=True)
-    H2 = plt.hist(subDF.TIME, bins=subDF.TIME[myBlocks.change_points], color='k', histtype='step', normed=True)
+    logger.info(f'Change points: {myBlocks.change_points}')
+    plt.hist(subDF.TIME, bins=32, histtype='stepfilled', alpha=0.2, density=True)
+    plt.hist(subDF.TIME, bins=subDF.TIME.iloc[myBlocks.change_points], color='k', histtype='step', density=True)
     plt.show()
     return subDF, myBlocks
 
