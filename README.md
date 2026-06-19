@@ -4,6 +4,23 @@
 [![DOI](https://zenodo.org/badge/23258/Cadarn/bayesBlocks.svg)](https://zenodo.org/badge/latestdoi/23258/Cadarn/bayesBlocks)
 
 
+## Environment setup
+
+Requires [uv](https://docs.astral.sh/uv/).
+
+```bash
+# Install dependencies (including dev tools)
+uv sync --group dev
+
+# Run the test suite
+uv run pytest
+
+# Run a single test by name
+uv run pytest -k "test_find_blocks"
+```
+
+## Implementation
+
 This is a python implementation of:
 > Studies in Astronomical Time Series Analysis. VI. Bayesian Block Representations:
 > *Jeffrey D. Scargle, Jay P. Norris, Brad Jackson, James Chiang* - 
